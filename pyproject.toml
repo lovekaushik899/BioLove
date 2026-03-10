@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biolove"
+version = "1.0.0"
+description = "BioLove: Automated FASTA feature extraction and feature selection pipeline using IFS and RFE"
+authors = [
+    {name = "Love Kaushik"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "tqdm"
+]
+
+[project.scripts]
+biolove = "fasta_processing:main"
