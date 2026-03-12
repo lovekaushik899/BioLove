@@ -3,6 +3,7 @@
 import argparse
 import os
 import math
+import itertools
 from collections import Counter
 from multiprocessing import Pool
 
@@ -27,128 +28,195 @@ from tqdm import tqdm
 
 def read_fasta(file):
 
-    header=None
-    seq=[]
+    header = None
+    seq = []
 
     with open(file) as f:
 
         for line in f:
 
-            line=line.strip()
+            line = line.strip()
 
             if line.startswith(">"):
 
                 if header:
-                    yield header,"".join(seq)
+                    yield header, "".join(seq)
 
-                header=line[1:]
-                seq=[]
+                header = line[1:]
+                seq = []
 
             else:
                 seq.append(line.upper())
 
         if header:
-            yield header,"".join(seq)
+            yield header, "".join(seq)
 
 
 ########################################################
 # FEATURE FUNCTIONS
 ########################################################
 
-def mono_composition(seq):
-
-    counts=Counter(seq)
-    length=len(seq)
-
-    return {
-        "A_freq":counts.get("A",0)/length,
-        "C_freq":counts.get("C",0)/length,
-        "G_freq":counts.get("G",0)/length,
-        "T_freq":counts.get("T",0)/length
-    }
-
-
-def dinucleotide_composition(seq):
-
-    kmers=[seq[i:i+2] for i in range(len(seq)-1)]
-    counts=Counter(kmers)
-
-    features={}
-
-    for a in "ACGT":
-        for b in "ACGT":
-
-            kmer=a+b
-            features[f"DNC_{kmer}"]=counts.get(kmer,0)/len(kmers)
-
-    return features
-
-
-def trinucleotide_composition(seq):
-
-    kmers=[seq[i:i+3] for i in range(len(seq)-2)]
-    counts=Counter(kmers)
-
-    features={}
-
-    for a in "ACGT":
-        for b in "ACGT":
-            for c in "ACGT":
-
-                kmer=a+b+c
-                features[f"TNC_{kmer}"]=counts.get(kmer,0)/len(kmers)
-
-    return features
+def seq_length(seq):
+    return len(seq)
 
 
 def gc_content(seq):
 
-    g=seq.count("G")
-    c=seq.count("C")
+    g = seq.count("G")
+    c = seq.count("C")
 
-    return (g+c)/len(seq)
+    return (g + c) / len(seq)
+
+
+def at_content(seq):
+
+    a = seq.count("A")
+    t = seq.count("T")
+
+    return (a + t) / len(seq)
 
 
 def gc_skew(seq):
 
-    g=seq.count("G")
-    c=seq.count("C")
+    g = seq.count("G")
+    c = seq.count("C")
 
-    if g+c==0:
+    if g + c == 0:
         return 0
 
-    return (g-c)/(g+c)
+    return (g - c) / (g + c)
 
+
+########################################################
+# MONONUCLEOTIDE COMPOSITION
+########################################################
+
+def mono_composition(seq):
+
+    counts = Counter(seq)
+    length = len(seq)
+
+    return {
+        "A_freq": counts.get("A", 0) / length,
+        "C_freq": counts.get("C", 0) / length,
+        "G_freq": counts.get("G", 0) / length,
+        "T_freq": counts.get("T", 0) / length
+    }
+
+
+########################################################
+# GENERALIZED KMER COMPOSITION
+########################################################
+
+def kmer_composition(seq, k):
+
+    kmers = [seq[i:i+k] for i in range(len(seq)-k+1)]
+    counts = Counter(kmers)
+
+    alphabet = ["A", "C", "G", "T"]
+    all_kmers = ["".join(p) for p in itertools.product(alphabet, repeat=k)]
+
+    features = {}
+
+    for kmer in all_kmers:
+        features[f"{k}mer_{kmer}"] = counts.get(kmer, 0) / len(kmers)
+
+    return features
+
+
+########################################################
+# K-SPACED NUCLEOTIDE PAIRS
+########################################################
+
+def k_spaced_pairs(seq, k=1):
+
+    counts = Counter()
+
+    for i in range(len(seq)-k-1):
+
+        pair = seq[i] + seq[i+k+1]
+        counts[pair] += 1
+
+    total = sum(counts.values())
+
+    features = {}
+
+    for a in "ACGT":
+        for b in "ACGT":
+
+            pair = a + b
+            features[f"k{k}_pair_{pair}"] = counts.get(pair, 0) / total
+
+    return features
+
+
+########################################################
+# ACCUMULATED NUCLEOTIDE FREQUENCY
+########################################################
+
+def accumulated_nucleotide_frequency(seq):
+
+    L = len(seq)
+
+    segments = [
+        seq[:int(L*0.25)],
+        seq[:int(L*0.50)],
+        seq[:int(L*0.75)]
+    ]
+
+    features = {}
+
+    for i, segment in enumerate(segments):
+
+        counts = Counter(segment)
+
+        for base in "ACGT":
+            features[f"ANF_{i+1}_{base}"] = counts.get(base, 0) / len(segment)
+
+    return features
+
+
+########################################################
+# SHANNON ENTROPY
+########################################################
 
 def shannon_entropy(seq):
 
-    counts=Counter(seq)
-    length=len(seq)
+    counts = Counter(seq)
+    length = len(seq)
 
-    entropy=0
+    entropy = 0
 
     for base in "ACGT":
 
-        p=counts.get(base,0)/length
+        p = counts.get(base, 0) / length
 
-        if p>0:
-            entropy-=p*math.log2(p)
+        if p > 0:
+            entropy -= p * math.log2(p)
 
     return entropy
 
 
+########################################################
+# Z CURVE
+########################################################
+
 def z_curve(seq):
 
-    a=seq.count("A")
-    c=seq.count("C")
-    g=seq.count("G")
-    t=seq.count("T")
+    a = seq.count("A")
+    c = seq.count("C")
+    g = seq.count("G")
+    t = seq.count("T")
 
-    x=(a+g)-(c+t)
-    y=(a+c)-(g+t)
-    z=(a+t)-(c+g)
+    x = (a + g) - (c + t)
+    y = (a + c) - (g + t)
+    z = (a + t) - (c + g)
 
-    return x,y,z
+    return {
+        "Z_curve_x": x,
+        "Z_curve_y": y,
+        "Z_curve_z": z
+    }
 
 
 ########################################################
@@ -157,27 +225,31 @@ def z_curve(seq):
 
 def extract_features(record):
 
-    header,seq,label=record
+    header, seq, label = record
 
-    features={}
+    features = {}
+
+    features["length"] = seq_length(seq)
+
+    features["GC_content"] = gc_content(seq)
+    features["AT_content"] = at_content(seq)
+    features["GC_skew"] = gc_skew(seq)
 
     features.update(mono_composition(seq))
-    features.update(dinucleotide_composition(seq))
-    features.update(trinucleotide_composition(seq))
 
-    features["GC_content"]=gc_content(seq)
-    features["GC_skew"]=gc_skew(seq)
+    features.update(kmer_composition(seq, 2))
+    features.update(kmer_composition(seq, 3))
 
-    features["entropy"]=shannon_entropy(seq)
+    features.update(k_spaced_pairs(seq, 1))
 
-    zx,zy,zz=z_curve(seq)
+    features.update(accumulated_nucleotide_frequency(seq))
 
-    features["z_x"]=zx
-    features["z_y"]=zy
-    features["z_z"]=zz
+    features["entropy"] = shannon_entropy(seq)
 
-    features["FASTA_Header"]=header
-    features["Label"]=label
+    features.update(z_curve(seq))
+
+    features["FASTA_Header"] = header
+    features["Label"] = label
 
     return features
 
@@ -186,15 +258,15 @@ def extract_features(record):
 # LOAD DATA
 ########################################################
 
-def load_dataset(pos_file,neg_file):
+def load_dataset(pos_file, neg_file):
 
-    dataset=[]
+    dataset = []
 
-    for h,s in read_fasta(pos_file):
-        dataset.append((h,s,1))
+    for h, s in read_fasta(pos_file):
+        dataset.append((h, s, 1))
 
-    for h,s in read_fasta(neg_file):
-        dataset.append((h,s,0))
+    for h, s in read_fasta(neg_file):
+        dataset.append((h, s, 0))
 
     return dataset
 
@@ -203,15 +275,15 @@ def load_dataset(pos_file,neg_file):
 # MODEL EVALUATION
 ########################################################
 
-def evaluate_model(model,X,y):
+def evaluate_model(model, X, y):
 
-    X_train,X_test,y_train,y_test=train_test_split(X,y,test_size=0.2)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
-    model.fit(X_train,y_train)
+    model.fit(X_train, y_train)
 
-    preds=model.predict(X_test)
+    preds = model.predict(X_test)
 
-    acc=accuracy_score(y_test,preds)
+    acc = accuracy_score(y_test, preds)
 
     return acc
 
@@ -220,48 +292,48 @@ def evaluate_model(model,X,y):
 # INCREMENTAL FEATURE SELECTION
 ########################################################
 
-def run_ifs(X,y,headers,labels,outdir):
+def run_ifs(X, y, headers, labels, outdir):
 
     print("\nRunning Incremental Feature Selection\n")
 
-    models={
-    "RandomForest":RandomForestClassifier(),
-    "SVM":SVC(),
-    "LogisticRegression":LogisticRegression(max_iter=1000),
-    "GradientBoosting":GradientBoostingClassifier()
+    models = {
+        "RandomForest": RandomForestClassifier(),
+        "SVM": SVC(),
+        "LogisticRegression": LogisticRegression(max_iter=1000),
+        "GradientBoosting": GradientBoostingClassifier()
     }
 
-    rf=RandomForestClassifier()
-    rf.fit(X,y)
+    rf = RandomForestClassifier()
+    rf.fit(X, y)
 
-    importances=rf.feature_importances_
+    importances = rf.feature_importances_
 
-    ranked=list(zip(X.columns,importances))
-    ranked=sorted(ranked,key=lambda x:x[1],reverse=True)
+    ranked = list(zip(X.columns, importances))
+    ranked = sorted(ranked, key=lambda x: x[1], reverse=True)
+    ranked = [x[0] for x in ranked]
 
-    ranked=[x[0] for x in ranked]
+    subset_sizes = [5, 10, 20, 50, 100]
 
-    subset_sizes=[5,10,20,50,100]
+    results = []
 
-    results=[]
-
-    for model_name,model in models.items():
+    for model_name, model in models.items():
 
         for size in subset_sizes:
 
-            selected=ranked[:size]
+            selected = ranked[:size]
 
-            X_sub=X[selected]
+            X_sub = X[selected]
 
-            acc=evaluate_model(model,X_sub,y)
+            acc = evaluate_model(model, X_sub, y)
 
-            results.append(["IFS",model_name,size,acc])
+            results.append(["IFS", model_name, size, acc])
 
-            df_out=pd.concat([headers,labels,X_sub],axis=1)
+            df_out = pd.concat([headers, labels, X_sub], axis=1)
 
             df_out.to_csv(
-            os.path.join(outdir,f"IFS_{model_name}_top{size}.csv"),
-            index=False)
+                os.path.join(outdir, f"IFS_{model_name}_top{size}.csv"),
+                index=False
+            )
 
             print(f"IFS {model_name} Top{size} Accuracy {acc*100:.2f}%")
 
@@ -272,40 +344,41 @@ def run_ifs(X,y,headers,labels,outdir):
 # RECURSIVE FEATURE ELIMINATION
 ########################################################
 
-def run_rfe(X,y,headers,labels,outdir):
+def run_rfe(X, y, headers, labels, outdir):
 
     print("\nRunning Recursive Feature Elimination\n")
 
-    models={
-    "LogisticRegression":LogisticRegression(max_iter=1000),
-    "RandomForest":RandomForestClassifier(),
-    "SVM":SVC(kernel="linear"),
-    "GradientBoosting":GradientBoostingClassifier()
+    models = {
+        "LogisticRegression": LogisticRegression(max_iter=1000),
+        "RandomForest": RandomForestClassifier(),
+        "SVM": SVC(kernel="linear"),
+        "GradientBoosting": GradientBoostingClassifier()
     }
 
-    subset_sizes=[5,10,20,50,100]
+    subset_sizes = [5, 10, 20, 50, 100]
 
-    results=[]
+    results = []
 
-    for model_name,model in models.items():
+    for model_name, model in models.items():
 
         for size in subset_sizes:
 
-            rfe=RFE(model,n_features_to_select=size)
+            rfe = RFE(model, n_features_to_select=size)
 
-            rfe.fit(X,y)
+            rfe.fit(X, y)
 
-            selected=X.columns[rfe.support_]
+            selected = X.columns[rfe.support_]
 
-            acc=evaluate_model(model,X[selected],y)
+            acc = evaluate_model(model, X[selected], y)
 
-            results.append(["RFE",model_name,size,acc])
+            results.append(["RFE", model_name, size, acc])
 
-            df_out=pd.concat([headers,labels,X[selected]],axis=1)
+            df_out = pd.concat([headers, labels, X[selected]], axis=1)
 
             df_out.to_csv(
-            os.path.join(outdir,f"RFE_{model_name}_top{size}.csv"),
-            index=False)
+                os.path.join(outdir, f"RFE_{model_name}_top{size}.csv"),
+                index=False
+            )
 
             print(f"RFE {model_name} Top{size} Accuracy {acc*100:.2f}%")
 
@@ -316,57 +389,58 @@ def run_rfe(X,y,headers,labels,outdir):
 # MAIN PIPELINE
 ########################################################
 
-def run_pipeline(pos,neg,outdir,cores):
+def run_pipeline(pos, neg, outdir, cores):
 
-    os.makedirs(outdir,exist_ok=True)
+    os.makedirs(outdir, exist_ok=True)
 
     print("\n==============================")
     print("BioLove FASTA Processing Pipeline")
     print("==============================\n")
 
-    dataset=load_dataset(pos,neg)
+    dataset = load_dataset(pos, neg)
 
-    print("Total sequences:",len(dataset))
+    print("Total sequences:", len(dataset))
 
     print("\nExtracting features\n")
 
     with Pool(cores) as p:
 
-        features=list(
-        tqdm(
-        p.imap(extract_features,dataset),
-        total=len(dataset)
-        ))
+        features = list(
+            tqdm(
+                p.imap(extract_features, dataset),
+                total=len(dataset)
+            )
+        )
 
-    df=pd.DataFrame(features)
+    df = pd.DataFrame(features)
 
-    df.to_csv(os.path.join(outdir,"consolidated_features.csv"),index=False)
+    df.to_csv(os.path.join(outdir, "consolidated_features.csv"), index=False)
 
-    headers=df[["FASTA_Header"]]
-    labels=df[["Label"]]
+    headers = df[["FASTA_Header"]]
+    labels = df[["Label"]]
 
-    X=df.drop(columns=["FASTA_Header","Label"])
-    y=df["Label"]
+    X = df.drop(columns=["FASTA_Header", "Label"])
+    y = df["Label"]
 
-    scaler=StandardScaler()
+    scaler = StandardScaler()
 
-    X_scaled=pd.DataFrame(
-    scaler.fit_transform(X),
-    columns=X.columns
+    X_scaled = pd.DataFrame(
+        scaler.fit_transform(X),
+        columns=X.columns
     )
 
-    ifs_results=run_ifs(X_scaled,y,headers,labels,outdir)
+    ifs_results = run_ifs(X_scaled, y, headers, labels, outdir)
+    rfe_results = run_rfe(X_scaled, y, headers, labels, outdir)
 
-    rfe_results=run_rfe(X_scaled,y,headers,labels,outdir)
-
-    summary=pd.DataFrame(
-    ifs_results+rfe_results,
-    columns=["Method","Model","Features","Accuracy"]
+    summary = pd.DataFrame(
+        ifs_results + rfe_results,
+        columns=["Method", "Model", "Features", "Accuracy"]
     )
 
     summary.to_csv(
-    os.path.join(outdir,"performance_summary.csv"),
-    index=False)
+        os.path.join(outdir, "performance_summary.csv"),
+        index=False
+    )
 
     print("\nPipeline completed\n")
 
@@ -377,19 +451,19 @@ def run_pipeline(pos,neg,outdir,cores):
 
 def main():
 
-    parser=argparse.ArgumentParser(
-    description="BioLove: FASTA Feature Extraction and Feature Selection Pipeline"
+    parser = argparse.ArgumentParser(
+        description="BioLove: FASTA Feature Extraction and Feature Selection Pipeline"
     )
 
-    parser.add_argument("--pos",required=True,help="Positive FASTA file")
-    parser.add_argument("--neg",required=True,help="Negative FASTA file")
-    parser.add_argument("--out",required=True,help="Output directory")
-    parser.add_argument("--cores",type=int,default=1,help="CPU cores")
+    parser.add_argument("--pos", required=True, help="Positive FASTA file")
+    parser.add_argument("--neg", required=True, help="Negative FASTA file")
+    parser.add_argument("--out", required=True, help="Output directory")
+    parser.add_argument("--cores", type=int, default=1, help="CPU cores")
 
-    args=parser.parse_args()
+    args = parser.parse_args()
 
-    run_pipeline(args.pos,args.neg,args.out,args.cores)
+    run_pipeline(args.pos, args.neg, args.out, args.cores)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
